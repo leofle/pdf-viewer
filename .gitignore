@@ -1,0 +1,17 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Tooling
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# Local test artifacts
+*.png.tmp
+test-results/
+playwright-report/
