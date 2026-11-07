@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>PDF Viewer</title>
-  <meta name="description" content="A fast, dependency-light PDF viewer that runs entirely in your browser. Built on Mozilla PDF.js.">
+  <meta name="description" content="A fast, dependency-light PDF viewer that runs entirely in your browser — view, search and sign. Built on Mozilla PDF.js.">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="vendor/pdfjs/web/pdf_viewer.css">
@@ -12,7 +12,8 @@
   <script>
     // Apply the saved / preferred theme before first paint to avoid a flash.
     (function () {
-      var t = localStorage.getItem("pdfv-theme");
+      var t = null;
+      try { t = localStorage.getItem("pdfv-theme"); } catch (e) {}
       if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       document.documentElement.dataset.theme = t;
     })();
@@ -37,6 +38,11 @@
       <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
       <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
       <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></symbol>
+      <symbol id="i-sign" viewBox="0 0 24 24"><path d="M15.5 4.5l4 4L9 19H5v-4z"/><path d="M13 7l4 4"/><path d="M3 22h18"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+      <symbol id="i-add" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></symbol>
     </defs>
   </svg>
 
@@ -80,6 +86,7 @@
     <div class="group right">
       <button class="icon-btn" id="findToggle" title="Search (Ctrl+F)" aria-label="Search" aria-expanded="false"><svg><use href="#i-search"/></svg></button>
       <div class="secondary" id="secondary">
+        <button class="icon-btn" id="signToggle" title="Signatures (S)" aria-label="Signatures" aria-expanded="false"><svg><use href="#i-sign"/></svg><span class="menu-label">Sign</span></button>
         <button class="icon-btn" id="rotate" title="Rotate clockwise (R)" aria-label="Rotate clockwise"><svg><use href="#i-rotate"/></svg><span class="menu-label">Rotate</span></button>
         <button class="icon-btn" id="download" title="Download" aria-label="Download"><svg><use href="#i-download"/></svg><span class="menu-label">Download</span></button>
         <button class="icon-btn" id="print" title="Print (Ctrl+P)" aria-label="Print"><svg><use href="#i-print"/></svg><span class="menu-label">Print</span></button>
@@ -100,6 +107,21 @@
     <button class="icon-btn" id="findClose" title="Close (Esc)" aria-label="Close search"><svg><use href="#i-close"/></svg></button>
   </div>
 
+  <section class="sigpanel" id="sigPanel" aria-label="Signatures" hidden>
+    <div class="sigpanel-head">
+      <strong>Signatures</strong>
+      <button class="icon-btn" id="sigPanelClose" title="Close (Esc)" aria-label="Close signatures"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <p class="muted small sigpanel-hint">Pick a signature, then click a page to place it. Drag to move, use the corner to resize.</p>
+    <div class="sig-list" id="sigList"></div>
+    <p class="muted small sig-empty" id="sigEmpty">No saved signatures yet.</p>
+    <button class="btn primary block" id="sigNew"><svg><use href="#i-add"/></svg>New signature</button>
+    <div class="sigpanel-foot">
+      <span class="muted small" id="sigPlacedCount">Nothing placed yet</span>
+      <button class="link small" id="sigClearAll" hidden>Remove all from document</button>
+    </div>
+  </section>
+
   <main class="main">
     <aside class="sidebar" id="sidebar" aria-label="Page thumbnails">
       <div class="thumbs" id="thumbs"></div>
@@ -119,6 +141,74 @@
       <div class="loading" id="loading" hidden><div class="spinner"></div><span id="loadingText">Loading…</span></div>
     </div>
   </main>
+
+  <div class="dropzone" id="dropzone" hidden><div>Drop PDF to open</div></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <div id="printContainer" aria-hidden="true"></div>
+
+  <div class="place-hint" id="placeHint" hidden>
+    <img id="placeHintImg" alt="">
+    <span>Click on a page to place your signature</span>
+    <button class="link" id="placeCancel">Cancel</button>
+  </div>
+  <img class="ghost" id="ghost" alt="" hidden>
+
+  <div class="modal-backdrop" id="sigModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sigModalTitle">
+      <div class="modal-head">
+        <h2 id="sigModalTitle">Create your signature</h2>
+        <button class="icon-btn" id="sigModalClose" aria-label="Close" title="Close (Esc)"><svg><use href="#i-close"/></svg></button>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="draw" aria-selected="true">Draw</button>
+        <button class="tab" role="tab" data-tab="type" aria-selected="false">Type</button>
+        <button class="tab" role="tab" data-tab="upload" aria-selected="false">Upload</button>
+      </div>
+
+      <div class="tab-panel" data-panel="draw">
+        <div class="pad-wrap">
+          <canvas id="sigPad" aria-label="Draw your signature here"></canvas>
+          <div class="pad-line"></div>
+          <span class="pad-hint" id="padHint">Sign above the line</span>
+        </div>
+        <div class="pad-tools">
+          <div class="swatches" role="radiogroup" aria-label="Ink colour">
+            <button class="swatch" data-color="#1f2330" aria-label="Black ink" aria-checked="true" role="radio" style="--c:#1f2330"></button>
+            <button class="swatch" data-color="#1d4ed8" aria-label="Blue ink" aria-checked="false" role="radio" style="--c:#1d4ed8"></button>
+            <button class="swatch" data-color="#4f46e5" aria-label="Violet ink" aria-checked="false" role="radio" style="--c:#4f46e5"></button>
+          </div>
+          <button class="btn ghost-btn" id="padUndo">Undo</button>
+          <button class="btn ghost-btn" id="padClear">Clear</button>
+        </div>
+      </div>
+
+      <div class="tab-panel" data-panel="type" hidden>
+        <input class="text-input" id="typeName" type="text" placeholder="Type your name" autocomplete="name" maxlength="60">
+        <div class="font-choices" id="fontChoices" role="radiogroup" aria-label="Signature style"></div>
+        <div class="swatches" role="radiogroup" aria-label="Ink colour" id="typeSwatches">
+          <button class="swatch" data-color="#1f2330" aria-label="Black ink" aria-checked="true" role="radio" style="--c:#1f2330"></button>
+          <button class="swatch" data-color="#1d4ed8" aria-label="Blue ink" aria-checked="false" role="radio" style="--c:#1d4ed8"></button>
+          <button class="swatch" data-color="#4f46e5" aria-label="Violet ink" aria-checked="false" role="radio" style="--c:#4f46e5"></button>
+        </div>
+      </div>
+
+      <div class="tab-panel" data-panel="upload" hidden>
+        <label class="upload-box" id="uploadBox">
+          <input type="file" id="uploadInput" accept="image/*" hidden>
+          <img id="uploadPreview" alt="" hidden>
+          <span id="uploadText"><svg><use href="#i-upload"/></svg><br>Choose a picture of your signature<br><span class="muted small">or paste one with Ctrl/Cmd + V</span></span>
+        </label>
+        <label class="check-row"><input type="checkbox" id="uploadClean" checked> Make the white background transparent</label>
+      </div>
+
+      <div class="modal-foot">
+        <label class="check-row"><input type="checkbox" id="sigSave" checked> Save for next time</label>
+        <span class="spacer"></span>
+        <button class="btn" id="sigCancel">Cancel</button>
+        <button class="btn primary" id="sigCreate" disabled>Use signature</button>
+      </div>
+    </div>
+  </div>
 
   <div class="dropzone" id="dropzone" hidden><div>Drop PDF to open</div></div>
   <div class="toast" id="toast" role="status" hidden></div>

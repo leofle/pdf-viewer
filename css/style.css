@@ -1,3 +1,9 @@
+/* Handwriting fonts for typed signatures (vendored from @fontsource, SIL OFL 1.1 — see vendor/fonts). */
+@font-face { font-family: "Dancing Script"; font-style: normal; font-weight: 400; font-display: swap; src: url(../vendor/fonts/dancing-script-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "Great Vibes"; font-style: normal; font-weight: 400; font-display: swap; src: url(../vendor/fonts/great-vibes-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "Caveat"; font-style: normal; font-weight: 500; font-display: swap; src: url(../vendor/fonts/caveat-latin-500-normal.woff2) format("woff2"); }
+@font-face { font-family: "Sacramento"; font-style: normal; font-weight: 400; font-display: swap; src: url(../vendor/fonts/sacramento-latin-400-normal.woff2) format("woff2"); }
+
 :root {
   --bg: #eef0f4;
   --surface: #ffffff;
@@ -12,6 +18,7 @@
   --toolbar-h: 52px;
   --sidebar-w: 200px;
   --radius: 10px;
+  --danger: #e5484d;
   color-scheme: light;
 }
 [data-theme="dark"] {
@@ -79,7 +86,7 @@ button, input, select { font: inherit; color: inherit; }
 .icon-btn:active { transform: translateY(1px); }
 .icon-btn:disabled { opacity: .4; cursor: default; background: transparent; }
 .icon-btn[aria-pressed="true"], .icon-btn[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); }
-.icon-btn svg, .find-icon, .empty-card svg {
+.icon-btn svg, .find-icon, .empty-card svg, .btn svg, .upload-box svg {
   width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
   stroke-linecap: round; stroke-linejoin: round; flex: none;
 }
@@ -109,7 +116,7 @@ button, input, select { font: inherit; color: inherit; }
   width: 220px; min-width: 0; flex: 1; height: 32px; border: 0; outline: none; background: transparent; padding: 0 4px;
 }
 .find-count { font-size: 12px; white-space: nowrap; min-width: 64px; text-align: right; padding-right: 4px; }
-.find-count.notfound { color: #e5484d; }
+.find-count.notfound { color: var(--danger); }
 .check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 0 4px; white-space: nowrap; cursor: pointer; }
 
 /* ---------- Layout ---------- */
@@ -127,12 +134,17 @@ body.sidebar-closed .sidebar { margin-left: calc(-1 * var(--sidebar-w) - 1px); }
 .thumb:hover { background: var(--hover); }
 .thumb .thumb-img {
   background: #fff; box-shadow: 0 0 0 1px var(--border), 0 2px 6px rgba(0,0,0,.08); border-radius: 3px;
-  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;
 }
 .thumb canvas { display: block; }
 .thumb span { font-size: 12px; color: var(--muted); }
 .thumb.active .thumb-img { box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(0,0,0,.12); }
 .thumb.active span { color: var(--accent); font-weight: 600; }
+.thumb .thumb-signed {
+  position: absolute; right: 4px; bottom: 4px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); color: #fff; display: grid; place-items: center;
+}
+.thumb .thumb-signed svg { display: block; }
 
 .viewer-wrap { flex: 1; position: relative; min-width: 0; }
 #viewerContainer {
@@ -178,6 +190,144 @@ body.sidebar-closed .sidebar { margin-left: calc(-1 * var(--sidebar-w) - 1px); }
 }
 .toast.error { background: #c62f35; }
 
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); cursor: pointer; font-weight: 500; white-space: nowrap;
+  transition: background .15s, border-color .15s, opacity .15s;
+}
+.btn:hover { background: var(--hover); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, #000); }
+.btn.block { width: 100%; }
+.btn svg { width: 18px; height: 18px; }
+.ghost-btn { border-color: transparent; background: transparent; height: 32px; padding: 0 10px; }
+
+/* ---------- Signature panel ---------- */
+.sigpanel {
+  position: absolute; top: calc(var(--toolbar-h) + 8px); right: 12px; z-index: 31;
+  width: 300px; max-width: calc(100vw - 24px); max-height: calc(100% - var(--toolbar-h) - 24px);
+  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.sigpanel-head { display: flex; align-items: center; justify-content: space-between; margin: -4px -4px 0 2px; font-size: 15px; }
+.sigpanel-hint { margin: -4px 0 0 2px; }
+.sig-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; overflow-y: auto; min-height: 0; }
+.sig-card {
+  position: relative; height: 76px; border: 1px solid var(--border); border-radius: 8px; background: #fff;
+  cursor: pointer; padding: 8px; display: flex; align-items: center; justify-content: center;
+  transition: box-shadow .15s, border-color .15s;
+}
+.sig-card:hover, .sig-card:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
+.sig-card.armed { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.sig-card img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+.sig-card .sig-del {
+  position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; min-width: 0; padding: 0;
+  border-radius: 6px; color: #6b7280; background: rgba(255,255,255,.9); opacity: 0; transition: opacity .15s;
+}
+.sig-card .sig-del svg { width: 15px; height: 15px; }
+.sig-card:hover .sig-del, .sig-card:focus-within .sig-del { opacity: 1; }
+.sig-card .sig-del:hover { color: var(--danger); background: #fff; }
+.sig-empty { margin: 0 2px; }
+.sigpanel-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 0; border-top: 1px solid var(--border); padding-top: 10px; }
+
+/* ---------- Placing ---------- */
+body.placing #viewerContainer .page { cursor: copy; }
+.ghost {
+  position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none; opacity: .75;
+  transform-origin: 0 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,.15));
+}
+.place-hint {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 110;
+  display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 12px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+  max-width: calc(100vw - 24px); white-space: nowrap;
+}
+.place-hint img { height: 28px; max-width: 80px; object-fit: contain; background: #fff; border-radius: 4px; padding: 2px; }
+.place-hint span { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Placed signatures on pages ---------- */
+.sig-layer { position: absolute; left: 0; top: 0; z-index: 5; transform-origin: 0 0; pointer-events: none; }
+.sig-item {
+  position: absolute; pointer-events: auto; cursor: move; touch-action: none; user-select: none;
+  border: 1px dashed transparent; border-radius: 2px;
+}
+.sig-item img { display: block; width: 100%; height: 100%; pointer-events: none; -webkit-user-drag: none; }
+.sig-item:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.sig-item.selected { border: 1px solid var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.sig-item .sig-handle, .sig-item .sig-tools { display: none; }
+.sig-item.selected .sig-handle, .sig-item.selected .sig-tools { display: flex; }
+.sig-handle {
+  position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: 2px solid #4f46e5; cursor: nwse-resize; touch-action: none;
+}
+.sig-tools {
+  position: absolute; left: 50%; top: -38px; transform: translateX(-50%) rotate(var(--counter-rot, 0deg)); gap: 2px; padding: 2px;
+  background: #fff; color: #1f2330; border: 1px solid #e3e5ea; border-radius: 8px; box-shadow: 0 4px 12px rgba(15,23,42,.15);
+}
+.sig-tools .icon-btn { min-width: 28px; height: 28px; padding: 0 5px; }
+.sig-tools .icon-btn svg { width: 16px; height: 16px; }
+.sig-tools .icon-btn:hover { background: rgba(15,23,42,.06); }
+.sig-tools .sig-remove:hover { color: var(--danger); }
+
+/* ---------- Signature dialog ---------- */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 90; background: rgba(15, 17, 23, .45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.modal {
+  width: 560px; max-width: 100%; max-height: 100%; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 14px;
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; }
+.modal-head h2 { margin: 0; font-size: 18px; }
+.tabs { display: flex; gap: 4px; padding: 3px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; }
+.tab {
+  flex: 1; height: 32px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; color: var(--muted); font-weight: 500;
+}
+.tab[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(15,23,42,.12); }
+.tab-panel { display: flex; flex-direction: column; gap: 10px; }
+.pad-wrap {
+  position: relative; height: 200px; border: 2px dashed var(--border); border-radius: 12px; background: #fff; overflow: hidden;
+}
+#sigPad { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; z-index: 1; }
+.pad-line { position: absolute; left: 24px; right: 24px; bottom: 48px; border-bottom: 1.5px solid #c9ccd4; }
+.pad-hint { position: absolute; left: 24px; bottom: 24px; color: #9aa1b1; font-size: 12px; pointer-events: none; }
+.pad-tools { display: flex; align-items: center; gap: 6px; }
+.pad-tools .swatches { margin-right: auto; }
+.swatches { display: flex; gap: 8px; }
+.swatch {
+  width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--surface); background: var(--c);
+  box-shadow: 0 0 0 1px var(--border); cursor: pointer; padding: 0;
+}
+.swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--accent); }
+.text-input {
+  height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); outline: none;
+}
+.text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.font-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.font-choice {
+  height: 72px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: #1f2330; cursor: pointer;
+  font-size: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px;
+}
+.font-choice[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.upload-box {
+  height: 200px; border: 2px dashed var(--border); border-radius: 12px; background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; color: var(--muted); padding: 12px;
+}
+.upload-box:hover { border-color: var(--accent); }
+.upload-box svg { width: 28px; height: 28px; color: var(--accent); }
+.upload-box img {
+  max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px;
+  background: repeating-conic-gradient(#eef0f4 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+}
+.check-row { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.modal-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.modal-foot .spacer { flex: 1; }
+
 /* ---------- Responsive ---------- */
 .show-sm { display: none; }
 @media (max-width: 900px) {
@@ -204,9 +354,18 @@ body.sidebar-closed .sidebar { margin-left: calc(-1 * var(--sidebar-w) - 1px); }
   .findbar { left: 6px; right: 6px; }
   .findbar .check { display: none; }
   #findInput { width: auto; }
+  .sigpanel { left: 6px; right: 6px; width: auto; max-width: none; }
+  .sig-list { grid-template-columns: 1fr 1fr; }
+  .modal { padding: 14px 14px 12px; }
+  .pad-wrap, .upload-box { height: 180px; }
+  .font-choice { font-size: 26px; }
+  .place-hint span { white-space: normal; font-size: 13px; }
+  .modal-foot .check-row { flex-basis: 100%; }
 }
 @media (max-width: 400px) {
   #prevPage, #nextPage { display: none; }
+  .font-choices { grid-template-columns: 1fr; }
+  .font-choice { height: 56px; }
 }
 
 /* ---------- Print ---------- */

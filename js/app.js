@@ -1,6 +1,7 @@
-// PDF Viewer — a static, build-free PDF viewer on top of Mozilla PDF.js.
-// PDF.js (pdfjs-dist 4.10.38) is vendored in /vendor so the app works offline and on GitHub Pages.
+// PDF Viewer — a static, build-free PDF viewer (and signer) on top of Mozilla PDF.js.
+// PDF.js (pdfjs-dist 4.10.38) and pdf-lib are vendored in /vendor so the app works offline and on GitHub Pages.
 import * as pdfjsLib from "../vendor/pdfjs/build/pdf.min.mjs";
+import { createSignatures } from "./signatures.js";
 
 // pdf_viewer.mjs reads the core library from globalThis, so it must be loaded after this assignment.
 globalThis.pdfjsLib = pdfjsLib;
@@ -12,6 +13,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("../vendor/pdfjs/build/pdf.work
 const CMAP_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/cmaps/`;
 const STANDARD_FONT_DATA_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/standard_fonts/`;
 const DEFAULT_FILE = "samples/sample.pdf";
+const NARROW = 720;
 
 const FindState = { FOUND: 0, NOT_FOUND: 1, WRAPPED: 2, PENDING: 3 };
 const $ = (id) => document.getElementById(id);
@@ -21,14 +23,14 @@ const els = {
   prev: $("prevPage"), next: $("nextPage"), pageNumber: $("pageNumber"), pageCount: $("pageCount"),
   zoomIn: $("zoomIn"), zoomOut: $("zoomOut"), scaleSelect: $("scaleSelect"), customScale: $("customScale"),
   fitWidth: $("fitWidth"), fitPage: $("fitPage"), rotate: $("rotate"), download: $("download"), print: $("print"),
-  themeToggle: $("themeToggle"), moreToggle: $("moreToggle"), secondary: $("secondary"),
+  themeToggle: $("themeToggle"), moreToggle: $("moreToggle"), secondary: $("secondary"), signToggle: $("signToggle"),
   findToggle: $("findToggle"), findbar: $("findbar"), findInput: $("findInput"), findCount: $("findCount"),
   findPrev: $("findPrev"), findNext: $("findNext"), findCase: $("findCase"), findWord: $("findWord"), findClose: $("findClose"),
   empty: $("emptyState"), emptyOpen: $("emptyOpen"), loading: $("loading"), loadingText: $("loadingText"),
   dropzone: $("dropzone"), toast: $("toast"), printContainer: $("printContainer"),
 };
 
-// ---------------------------------------------------------------- PDF.js viewer setup
+// ---------------------------------------------------------------- Viewer setup
 const eventBus = new pdfjsViewer.EventBus();
 const linkService = new pdfjsViewer.PDFLinkService({ eventBus, externalLinkTarget: pdfjsViewer.LinkTarget?.BLANK ?? 2 });
 const findController = new pdfjsViewer.PDFFindController({ eventBus, linkService });
@@ -39,19 +41,15 @@ const pdfViewer = new pdfjsViewer.PDFViewer({
   linkService,
   findController,
   removePageBorders: true,
-  textLayerMode: 1, // enable selectable text
+  textLayerMode: 1,
   annotationMode: pdfjsLib.AnnotationMode.ENABLE_FORMS,
 });
 linkService.setViewer(pdfViewer);
 
-const state = {
-  pdf: null,
-  loadingTask: null,
-  fileName: "document.pdf",
-  loadId: 0,
-};
+const state = { pdf: null, loadingTask: null, fileName: "document.pdf", loadId: 0 };
+const signatures = createSignatures({ pdfjsLib, pdfViewer, eventBus, els, state, toast, closeMore, onPlacementsChanged: markThumbs });
 
-// ---------------------------------------------------------------- Loading documents
+// ---------------------------------------------------------------- Opening documents
 async function openDocument(source, fileName) {
   const loadId = ++state.loadId;
   showLoading("Loading…");
@@ -59,8 +57,7 @@ async function openDocument(source, fileName) {
   await closeDocument();
 
   const params = { cMapUrl: CMAP_URL, cMapPacked: true, standardFontDataUrl: STANDARD_FONT_DATA_URL };
-  if (typeof source === "string") params.url = source;
-  else params.data = source;
+  if (typeof source === "string") params.url = source; else params.data = source;
 
   const task = pdfjsLib.getDocument(params);
   state.loadingTask = task;
@@ -92,7 +89,7 @@ async function openDocument(source, fileName) {
     try {
       const { info } = await pdf.getMetadata();
       if (info?.Title && String(info.Title).trim()) title = String(info.Title).trim();
-    } catch { /* metadata is optional */ }
+    } catch { /* optional */ }
     els.docTitle.textContent = title;
     els.docTitle.title = state.fileName;
     document.title = `${title} – PDF Viewer`;
@@ -115,6 +112,7 @@ async function closeDocument() {
   thumbObserver?.disconnect();
   els.thumbs.replaceChildren();
   closeFind();
+  signatures.reset();
   if (state.loadingTask) { const t = state.loadingTask; state.loadingTask = null; await t.destroy().catch(() => {}); }
   if (state.pdf) {
     state.pdf = null;
@@ -129,20 +127,20 @@ function openFromFile(file) {
     toast("Please choose a PDF file.", true);
     return;
   }
+  if (signatures.hasUnsaved() && !window.confirm("Your placed signatures haven't been downloaded yet. Open the new file anyway?")) return;
   file.arrayBuffer().then((buf) => openDocument(new Uint8Array(buf), file.name));
-  history.replaceState(null, "", location.pathname); // a local file has no shareable URL
+  history.replaceState(null, "", location.pathname);
 }
 
 function fileNameFromUrl(url) {
   try {
-    const name = decodeURIComponent(new URL(url, location.href).pathname.split("/").pop() || "");
-    return name || "document.pdf";
+    return decodeURIComponent(new URL(url, location.href).pathname.split("/").pop() || "") || "document.pdf";
   } catch { return "document.pdf"; }
 }
 
 // ---------------------------------------------------------------- Viewer events
 eventBus.on("pagesinit", () => {
-  pdfViewer.currentScaleValue = window.innerWidth <= 720 ? "page-width" : "auto";
+  pdfViewer.currentScaleValue = window.innerWidth <= NARROW ? "page-width" : "auto";
   if (location.hash.length > 1) linkService.setHash(location.hash.slice(1));
   els.container.focus({ preventScroll: true });
 });
@@ -183,12 +181,11 @@ const actions = {
   zoomOut: () => pdfViewer.decreaseScale(),
   setScale: (v) => { pdfViewer.currentScaleValue = v; },
   rotate: (delta = 90) => { pdfViewer.pagesRotation = (pdfViewer.pagesRotation + delta + 360) % 360; },
-  download, print: printDocument, toggleTheme, toggleSidebar,
 };
 
 function setControlsEnabled(on) {
   for (const el of [els.prev, els.next, els.pageNumber, els.zoomIn, els.zoomOut, els.scaleSelect, els.fitWidth,
-    els.fitPage, els.rotate, els.download, els.print, els.findToggle]) el.disabled = !on;
+    els.fitPage, els.rotate, els.download, els.print, els.findToggle, els.signToggle]) el.disabled = !on;
   if (!on) { els.pageCount.textContent = "–"; els.pageNumber.value = ""; els.docTitle.textContent = "PDF Viewer"; }
 }
 
@@ -206,6 +203,7 @@ els.rotate.addEventListener("click", () => { actions.rotate(); closeMore(); });
 els.download.addEventListener("click", () => { download(); closeMore(); });
 els.print.addEventListener("click", () => { printDocument(); closeMore(); });
 els.themeToggle.addEventListener("click", () => { toggleTheme(); closeMore(); });
+els.signToggle.addEventListener("click", (e) => { e.stopPropagation(); closeMore(); closeFind(); signatures.togglePanel(); });
 els.sidebarToggle.addEventListener("click", toggleSidebar);
 els.openFile.addEventListener("click", () => els.fileInput.click());
 els.emptyOpen.addEventListener("click", () => els.fileInput.click());
@@ -234,7 +232,7 @@ function commitPageNumber() {
 function toggleTheme() {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
-  localStorage.setItem("pdfv-theme", next);
+  try { localStorage.setItem("pdfv-theme", next); } catch { /* private mode */ }
 }
 
 function setSidebar(open) {
@@ -242,9 +240,8 @@ function setSidebar(open) {
   els.sidebarToggle.setAttribute("aria-pressed", String(open));
 }
 function toggleSidebar() { setSidebar(document.body.classList.contains("sidebar-closed")); }
-setSidebar(window.innerWidth > 720);
+setSidebar(window.innerWidth > NARROW);
 els.sidebar.addEventListener("transitionend", () => {
-  // Re-apply preset zoom modes after the available width changes.
   const v = pdfViewer.currentScaleValue;
   if (state.pdf && isNaN(Number(v))) pdfViewer.currentScaleValue = v;
 });
@@ -257,9 +254,7 @@ function buildThumbnails(pdf) {
   thumbObserver?.disconnect();
   els.thumbs.replaceChildren();
   thumbObserver = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (entry.isIntersecting) renderThumbnail(entry.target);
-    }
+    for (const entry of entries) if (entry.isIntersecting) renderThumbnail(entry.target);
   }, { root: els.sidebar, rootMargin: "300px 0px" });
 
   const frag = document.createDocumentFragment();
@@ -278,7 +273,7 @@ function buildThumbnails(pdf) {
     btn.append(box, label);
     btn.addEventListener("click", () => {
       pdfViewer.currentPageNumber = i;
-      if (window.innerWidth <= 720) setSidebar(false);
+      if (window.innerWidth <= NARROW) setSidebar(false);
     });
     frag.append(btn);
     thumbObserver.observe(btn);
@@ -294,9 +289,9 @@ async function renderThumbnail(btn) {
   const rotation = pdfViewer.pagesRotation;
   try {
     const page = await pdf.getPage(Number(btn.dataset.page));
-    const base = page.getViewport({ scale: 1, rotation: (page.rotate + rotation) % 360 });
-    const scale = THUMB_WIDTH / base.width;
-    const viewport = page.getViewport({ scale, rotation: (page.rotate + rotation) % 360 });
+    const rot = (page.rotate + rotation) % 360;
+    const base = page.getViewport({ scale: 1, rotation: rot });
+    const viewport = page.getViewport({ scale: THUMB_WIDTH / base.width, rotation: rot });
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const canvas = document.createElement("canvas");
     canvas.width = Math.floor(viewport.width * dpr);
@@ -311,12 +306,13 @@ async function renderThumbnail(btn) {
     const box = btn.querySelector(".thumb-img");
     box.style.width = canvas.style.width;
     box.style.height = canvas.style.height;
+    const badge = box.querySelector(".thumb-signed");
     box.replaceChildren(canvas);
+    if (badge) box.append(badge);
   } catch (err) {
     if (pdf !== state.pdf) return;
     btn.dataset.rendered = "";
     if (err?.name === "RenderingCancelledException") {
-      // Cancelled (e.g. by a concurrent cleanup) — re-observe so it is retried while visible.
       thumbObserver?.unobserve(btn);
       thumbObserver?.observe(btn);
     } else {
@@ -331,8 +327,9 @@ function rerenderThumbnails() {
     btn.dataset.rendered = "";
     const box = btn.querySelector(".thumb-img");
     const [w, h] = [box.style.width, box.style.height];
+    const badge = box.querySelector(".thumb-signed");
     box.replaceChildren();
-    // Swap the placeholder's aspect ratio so the layout stays roughly right until re-rendered.
+    if (badge) box.append(badge);
     box.style.width = `${THUMB_WIDTH}px`;
     box.style.height = `${Math.round((parseFloat(w) / parseFloat(h)) * THUMB_WIDTH) || THUMB_WIDTH}px`;
     thumbObserver.unobserve(btn);
@@ -341,8 +338,7 @@ function rerenderThumbnails() {
 }
 
 function setActiveThumb(n) {
-  const prev = els.thumbs.querySelector(".thumb.active");
-  prev?.classList.remove("active");
+  els.thumbs.querySelector(".thumb.active")?.classList.remove("active");
   const cur = els.thumbs.children[n - 1];
   if (!cur) return;
   cur.classList.add("active");
@@ -353,9 +349,26 @@ function setActiveThumb(n) {
   }
 }
 
+// Small pen badge on thumbnails of pages that carry a signature.
+function markThumbs(pagesWithSignatures) {
+  [...els.thumbs.children].forEach((btn, i) => {
+    const box = btn.querySelector(".thumb-img");
+    const has = pagesWithSignatures.has(i + 1);
+    let badge = box.querySelector(".thumb-signed");
+    if (has && !badge) {
+      badge = document.createElement("span");
+      badge.className = "thumb-signed";
+      badge.title = "This page has a signature";
+      badge.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 4.5l4 4L9 19H5v-4z"/><path d="M13 7l4 4"/></svg>';
+      box.append(badge);
+    } else if (!has && badge) badge.remove();
+  });
+}
+
 // ---------------------------------------------------------------- Search
 function openFind() {
   if (!state.pdf) return;
+  signatures.closePanel();
   els.findbar.hidden = false;
   els.findToggle.setAttribute("aria-expanded", "true");
   els.findInput.focus();
@@ -370,14 +383,9 @@ function closeFind() {
 }
 function dispatchFind(type, findPrevious = false) {
   eventBus.dispatch("find", {
-    source: null,
-    type,
-    query: els.findInput.value,
-    caseSensitive: els.findCase.checked,
-    entireWord: els.findWord.checked,
-    highlightAll: true,
-    findPrevious,
-    matchDiacritics: false,
+    source: null, type, query: els.findInput.value,
+    caseSensitive: els.findCase.checked, entireWord: els.findWord.checked,
+    highlightAll: true, findPrevious, matchDiacritics: false,
   });
 }
 function updateFindCount({ current, total }) {
@@ -406,26 +414,54 @@ eventBus.on("updatefindcontrolstate", ({ state: s, matchesCount, previous }) => 
 });
 
 // ---------------------------------------------------------------- Download & print
-async function download() {
-  if (!state.pdf) return;
-  const data = await state.pdf.getData();
+function saveBlob(data, name) {
   const url = URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = /\.pdf$/i.test(state.fileName) ? state.fileName : `${state.fileName}.pdf`;
+  a.download = name;
   document.body.append(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
+async function download() {
+  if (!state.pdf) return;
+  const base = state.fileName.replace(/\.pdf$/i, "");
+  try {
+    if (signatures.count() > 0) {
+      showLoading("Adding signatures…");
+      const bytes = await signatures.buildSignedPdf();
+      saveBlob(bytes, `${base}-signed.pdf`);
+      signatures.markSaved();
+      toast("Signed copy downloaded");
+    } else {
+      saveBlob(await state.pdf.getData(), `${base}.pdf`);
+    }
+  } catch (err) {
+    console.warn("Download failed", err);
+    toast("Couldn't prepare the download.", true);
+  } finally {
+    hideLoading();
+  }
+}
+
 let printing = false;
 async function printDocument() {
   if (!state.pdf || printing) return;
   printing = true;
-  const pdf = state.pdf;
+  let pdf = state.pdf;
+  let temp = null;
   const urls = [];
   try {
+    if (signatures.count() > 0) {
+      showLoading("Adding signatures…");
+      temp = await pdfjsLib.getDocument({
+        data: await signatures.buildSignedPdf(),
+        cMapUrl: CMAP_URL, cMapPacked: true, standardFontDataUrl: STANDARD_FONT_DATA_URL,
+      }).promise;
+      pdf = temp;
+    }
     els.printContainer.replaceChildren();
     for (let i = 1; i <= pdf.numPages; i++) {
       showLoading(`Preparing to print… ${i}/${pdf.numPages}`);
@@ -445,7 +481,6 @@ async function printDocument() {
       img.src = url;
       els.printContainer.append(img);
       await img.decode().catch(() => {});
-      if (pdf !== state.pdf) return;
     }
     hideLoading();
     window.print();
@@ -455,7 +490,7 @@ async function printDocument() {
   } finally {
     hideLoading();
     printing = false;
-    // Clean up once the dialog has closed (print() blocks in most browsers).
+    temp?.destroy();
     setTimeout(() => { els.printContainer.replaceChildren(); urls.forEach(URL.revokeObjectURL); }, 1000);
   }
 }
@@ -465,6 +500,7 @@ document.addEventListener("keydown", (e) => {
   const mod = e.ctrlKey || e.metaKey;
   const tag = e.target.tagName;
   const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || e.target.isContentEditable;
+  if (signatures.modalOpen()) return; // the signature dialog handles its own keys
 
   if (mod && !e.altKey) {
     switch (e.key) {
@@ -475,11 +511,16 @@ document.addEventListener("keydown", (e) => {
       case "+": case "=": if (state.pdf) { e.preventDefault(); actions.zoomIn(); } return;
       case "-": case "_": if (state.pdf) { e.preventDefault(); actions.zoomOut(); } return;
       case "0": if (state.pdf) { e.preventDefault(); actions.setScale("auto"); } return;
+      case "c": case "C": if (!typing && signatures.copySelected()) e.preventDefault(); return;
     }
     return;
   }
-  if (e.key === "Escape") { closeFind(); closeMore(); return; }
+  if (e.key === "Escape") {
+    if (signatures.escape()) return;
+    closeFind(); closeMore(); return;
+  }
   if (typing || !state.pdf || e.altKey) return;
+  if (signatures.handleKey(e)) return;
 
   switch (e.key) {
     case "ArrowLeft": case "k": e.preventDefault(); actions.prev(); break;
@@ -488,6 +529,7 @@ document.addEventListener("keydown", (e) => {
     case "End": e.preventDefault(); actions.last(); break;
     case "r": actions.rotate(90); break;
     case "R": actions.rotate(-90); break;
+    case "s": case "S": closeFind(); signatures.togglePanel(); break;
     case "+": case "=": actions.zoomIn(); break;
     case "-": actions.zoomOut(); break;
   }
@@ -495,13 +537,13 @@ document.addEventListener("keydown", (e) => {
 
 els.container.addEventListener("wheel", (e) => {
   if (!(e.ctrlKey || e.metaKey) || !state.pdf) return;
-  e.preventDefault(); // ctrl + wheel / trackpad pinch zooms the document, not the page
+  e.preventDefault();
   pdfViewer.updateScale({ drawingDelay: 300, steps: e.deltaY < 0 ? 1 : -1 });
 }, { passive: false });
 
 let dragDepth = 0;
 const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
-window.addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; els.dropzone.hidden = false; });
+window.addEventListener("dragenter", (e) => { if (!hasFiles(e) || signatures.modalOpen()) return; e.preventDefault(); dragDepth++; els.dropzone.hidden = false; });
 window.addEventListener("dragover", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
 window.addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; if (--dragDepth <= 0) { dragDepth = 0; els.dropzone.hidden = true; } });
 window.addEventListener("drop", (e) => {
@@ -509,12 +551,19 @@ window.addEventListener("drop", (e) => {
   e.preventDefault();
   dragDepth = 0;
   els.dropzone.hidden = true;
-  openFromFile(e.dataTransfer.files[0]);
+  if (signatures.modalOpen()) { signatures.useDroppedImage(e.dataTransfer.files[0]); return; }
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith("image/")) { signatures.fromImageFile(file); return; }
+  openFromFile(file);
 });
 
 window.addEventListener("resize", () => {
   const v = pdfViewer.currentScaleValue;
   if (state.pdf && isNaN(Number(v))) pdfViewer.currentScaleValue = v;
+});
+
+window.addEventListener("beforeunload", (e) => {
+  if (signatures.hasUnsaved()) { e.preventDefault(); e.returnValue = ""; }
 });
 
 // ---------------------------------------------------------------- UI helpers
@@ -536,4 +585,4 @@ const initial = fileParam || DEFAULT_FILE;
 openDocument(new URL(initial, location.href).href, fileNameFromUrl(initial));
 
 // Exposed for debugging and automated tests.
-window.PDFViewerApp = { pdfjsLib, pdfViewer, eventBus, findController, linkService, state, openDocument, actions };
+window.PDFViewerApp = { findController, linkService, pdfjsLib, pdfViewer, eventBus, state, openDocument, actions, signatures };

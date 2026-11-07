@@ -21,6 +21,10 @@ step and no framework, and nothing is uploaded: your files stay on your device.
 - **Thumbnails sidebar** that renders lazily and follows the current page.
 - **Rotate** pages clockwise (`R`) or counter-clockwise (`Shift+R`).
 - **Download** the open document, or **print** it (pages are rendered at 150 DPI for printing).
+- **Sign documents**: draw a signature (mouse, touch or pen pressure), type it in one of four handwriting fonts, or
+  upload/paste a picture of it (the white background is made transparent). Place it on any page, then drag to move, use
+  the corner to resize, duplicate or delete it, and copy/paste it between pages. Up to 12 signatures are saved in your
+  browser for next time. *Download* and *Print* write the signatures into the PDF (as `<name>-signed.pdf`).
 - **Dark mode** that follows your system setting by default; your choice is remembered.
 - **Responsive**: on small screens the sidebar becomes an overlay and secondary actions move into a menu.
 - Password-protected PDFs (you get a password prompt), internal links, and `#page=N` / `#zoom=` URL hashes.
@@ -34,6 +38,8 @@ step and no framework, and nothing is uploaded: your files stay on your device.
 | `Ctrl/⌘ + F` | Search (`Enter` next, `Shift+Enter` previous, `Esc` close) |
 | `Ctrl/⌘ + +` / `−` / `0` | Zoom in / out / reset |
 | `R` / `Shift + R` | Rotate clockwise / counter-clockwise |
+| `S` | Signatures panel |
+| `Delete` / arrows / `Ctrl/⌘ + C`, `V` | Remove / nudge (`Shift` for bigger steps) / copy & paste the selected signature |
 | `Ctrl/⌘ + O` | Open a file |
 | `Ctrl/⌘ + S` | Download |
 | `Ctrl/⌘ + P` | Print |
@@ -63,7 +69,10 @@ paths such as `?file=samples/sample.pdf` always work.
 index.html              App shell and toolbar
 css/style.css           Styles (light/dark themes, responsive layout, print)
 js/app.js               Viewer logic (loading, navigation, zoom, search, thumbnails, print…)
+js/signatures.js        Signatures: create, save, place on pages, write into the PDF
 vendor/pdfjs/           PDF.js 4.10.38 (pdfjs-dist), vendored: library, worker, viewer components
+vendor/pdf-lib/         pdf-lib 1.17.1 (ESM build), used to write signatures into the PDF
+vendor/fonts/           Handwriting fonts for typed signatures (from @fontsource)
 samples/sample.pdf      Demo document
 scripts/make_sample.py  Script that generates the demo document (needs `pip install reportlab`)
 ```
@@ -81,3 +90,5 @@ It's a static site. On GitHub Pages, select *Deploy from a branch → `main` / r
 [MIT](LICENSE) © L. Fleishman.
 
 PDF.js is © Mozilla and contributors, licensed under the Apache License 2.0 (see `vendor/pdfjs/LICENSE`).
+pdf-lib is © Andrew Dillon, MIT (see `vendor/pdf-lib/LICENSE.md`). Dancing Script, Great Vibes, Caveat and Sacramento are
+licensed under the SIL Open Font License 1.1 (see `vendor/fonts/`).
